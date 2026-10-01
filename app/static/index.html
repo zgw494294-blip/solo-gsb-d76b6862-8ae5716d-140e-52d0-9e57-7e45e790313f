@@ -352,10 +352,13 @@ let debounceTimer = null;
 let calcSeq = 0;
 
 /* 施工验收状态：
-   frozen 仅在“冻结”瞬间由当前已算完、可行且与地面/净宽一致的方案产生；
+   frozen 仅在“冻结”瞬间由当前已算完、可行且与地面/净宽一致的方案产生
+   （冻结资格的唯一判定是 resultMatchesCurrent，按钮状态与冻结动作共用）；
    measured 元素数量恒与冻结方案一致（非法编辑记为 NaN）；
    reviewReport 为最近一次复核报告，accepted 为确认状态；
-   reviewSeq 单调递增，任何编辑都使在途复核响应立刻失效。 */
+   reviewSeq 单调递增，任何编辑都使在途复核响应立刻失效；
+   calcSeq 在地面/净宽编辑时立即递增（不等防抖计算启动），
+   使在途规划响应（成功/无解/失败）一律作废，不得回写页面或恢复冻结。 */
 let frozen = null;
 let measured = [];
 let reviewReport = null;
@@ -861,20 +864,36 @@ function arrEq(a, b) {
     && a.every((v, i) => v === b[i]);
 }
 
-/* 当前页面状态是否与冻结方案一致：地面、净宽相同，且方案仍是已算完结果 */
-function freezeMatchesCurrent() {
-  if (!frozen || !lastResult || !lastResult.feasible) return false;
+/* 冻结资格的唯一判定（冻结按钮可用状态与冻结动作共用）：
+   已有算完且可行的结果，且该结果对应当前的地面与净宽。
+   编辑地面/净宽后、新计算完成前，旧结果不再对应当前输入，不可冻结。 */
+function resultMatchesCurrent() {
+  if (!lastResult || !lastResult.feasible) return false;
   const w = readWidth();
   return w.ok
     && arrEq(lastResult.ground, ground)
-    && arrEq(lastResult.plan, frozen.plan)
     && lastResult.width === w.value;
 }
 
-/* 地面或净宽变化：废弃冻结方案与实测（在途复核/迟到响应也不能恢复） */
+/* 冻结快照是否仍有效：核对快照自身记录的地面、净宽与当前一致，
+   且当前结果已算完、可行并与快照同源。不能只比较方案标高——
+   净宽不改变方案标高，仅比标高会把旧净宽下的快照误判为有效。 */
+function freezeMatchesCurrent() {
+  if (!frozen || !resultMatchesCurrent()) return false;
+  const w = readWidth();
+  return w.ok
+    && arrEq(frozen.ground, ground)
+    && frozen.width === w.value
+    && arrEq(frozen.plan, lastResult.plan);
+}
+
+/* 地面或净宽变化：立即废弃冻结方案、实测、报告与确认
+   （在途复核/迟到响应也不能恢复），并让在途规划响应立即失效——
+   不等防抖计算启动；同时按统一判定禁用冻结，防止冻结旧结果。 */
 function invalidateFreeze() {
   reviewSeq++;
   clearTimeout(reviewTimer);
+  calcSeq++;   // 在途规划响应（成功/无解/失败）一律作废，不得回写或恢复冻结
   frozen = null;
   measured = [];
   reviewReport = null;
@@ -884,7 +903,7 @@ function invalidateFreeze() {
   $("acceptToolbar").hidden = true;
   const fb = $("btnFreeze");
   fb.textContent = "冻结当前方案";
-  fb.disabled = !(lastResult && lastResult.feasible);
+  fb.disabled = !resultMatchesCurrent();
   $("freezeNote").textContent = "地面或净宽已修改：冻结方案与实测已废弃，请重新计算后冻结。";
   $("confirmState").textContent = "";
 }
@@ -903,8 +922,9 @@ function onWidthEdit() {
 }
 
 function doFreeze() {
-  if (!lastResult || !lastResult.feasible) return;
-  // 重新冻结须清除旧实测、报告和确认
+  // 与冻结按钮可用状态同一判定：仅算完、可行且对应当前地面/净宽的结果可冻结
+  if (!resultMatchesCurrent()) { renderFreezeBar(); return; }
+  // 重新冻结须清除旧实测、报告和确认（迟到复核响应也不能恢复它们）
   reviewSeq++;
   clearTimeout(reviewTimer);
   frozen = {
@@ -1017,9 +1037,10 @@ function onConfirm() {
 
 function renderFreezeBar() {
   const bar = $("acceptToolbar");
+  const can = resultMatchesCurrent();   // 与 doFreeze 同一判定
   if (frozen && freezeMatchesCurrent()) {
     $("btnFreeze").textContent = "重新冻结当前方案";
-    $("btnFreeze").disabled = !(lastResult && lastResult.feasible);
+    $("btnFreeze").disabled = !can;
     $("freezeNote").innerHTML =
       "已冻结方案：<b>" + frozen.plan.join("，") + "</b>"
       + "（净宽 " + fmtNum(frozen.width, 2) + " 米，"
@@ -1031,11 +1052,12 @@ function renderFreezeBar() {
     else clearReviewView();
   } else {
     $("btnFreeze").textContent = "冻结当前方案";
-    const can = !!(lastResult && lastResult.feasible);
     $("btnFreeze").disabled = !can;
     $("freezeNote").textContent = can
       ? "尚未冻结方案。点击“冻结当前方案”锁定当前可行方案后，方可录入实测并复核。"
-      : "当前输入无可行方案，无法冻结。";
+      : (lastResult && lastResult.feasible
+          ? "地面或净宽已修改：等待重新计算完成后才能冻结。"
+          : "当前输入无可行方案，无法冻结。");
     bar.hidden = true;
   }
   renderConfirmState();

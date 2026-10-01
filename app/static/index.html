@@ -292,7 +292,7 @@
   <section class="card" id="acceptCard" hidden>
     <h2>施工验收 <span class="tag">仅能冻结与当前地面、净宽一致且已算完的可行方案；复核不对实测重新求优</span></h2>
     <div class="accept-bar">
-      <button id="btnFreeze" class="primary">冻结当前方案</button>
+      <button id="btnFreeze" class="primary" disabled>冻结当前方案</button>
       <span class="frozen-note" id="freezeNote">尚未冻结方案。</span>
     </div>
 
@@ -349,10 +349,15 @@ let ground = [100, 107, 114, 119, 124, 130];
 let lastResult = null;
 let lastLockable = null;
 let debounceTimer = null;
+/* calcSeq 在“编辑发生的瞬间”自增（不等待防抖计算启动），使在途规划
+   响应立即作废；resultSeq 为最后一次落到页面的结果所对应的 calcSeq，
+   冻结只允许针对当前地面/净宽的当次新鲜结果。 */
 let calcSeq = 0;
+let resultSeq = -1;
 
 /* 施工验收状态：
-   frozen 仅在“冻结”瞬间由当前已算完、可行且与地面/净宽一致的方案产生；
+   frozen 仅在“冻结”瞬间由当前已算完、可行且与地面/净宽一致的方案产生，
+   快照自带 ground/width，后续有效性只与快照自身核对；
    measured 元素数量恒与冻结方案一致（非法编辑记为 NaN）；
    reviewReport 为最近一次复核报告，accepted 为确认状态；
    reviewSeq 单调递增，任何编辑都使在途复核响应立刻失效。 */
@@ -418,10 +423,10 @@ function renderEditor() {
 function onEdit(e) {
   const idx = Number(e.target.dataset.index);
   const raw = e.target.value.trim();
-  if (raw === "") { ground[idx] = NaN; invalidateFreeze(); scheduleCalc(); return; }
+  if (raw === "") { ground[idx] = NaN; invalidateInputs(); scheduleCalc(); return; }
   const v = Number(raw);
   ground[idx] = Number.isInteger(v) ? v : NaN;
-  invalidateFreeze();
+  invalidateInputs();
   scheduleCalc();
 }
 
@@ -441,20 +446,20 @@ function readWidth() {
 function addPoint() {
   if (ground.length >= N_MAX) return;
   ground.push(ground[ground.length - 1]);
-  invalidateFreeze();
+  invalidateInputs();
   renderEditor();
   scheduleCalc();
 }
 function removePoint() {
   if (ground.length <= N_MIN) return;
   ground.pop();
-  invalidateFreeze();
+  invalidateInputs();
   renderEditor();
   scheduleCalc();
 }
 function loadSample() {
   ground = [100, 107, 114, 119, 124, 130];
-  invalidateFreeze();
+  invalidateInputs();
   renderEditor();
   scheduleCalc();
 }
@@ -489,17 +494,20 @@ function clearBanner() {
 }
 
 async function calculate() {
-  const seq = ++calcSeq;
+  const seq = calcSeq;
   const err = clientValidate();
   const widthInfo = readWidth();
   if (err || !widthInfo.ok) {
+    if (seq !== calcSeq) return;   // 编辑已再次发生：迟到的非法分支不得回写
     lastResult = null;
     lastLockable = null;
+    resultSeq = seq;
     $("resultCard").hidden = true;
     $("earthworkCard").hidden = true;
     $("acceptCard").hidden = true;
     showBanner("error", "<b>非法输入：</b>" + escapeHtml(err || widthInfo.reason));
     drawChart(null, null);
+    renderFreezeBar();
     return;
   }
   try {
@@ -516,10 +524,13 @@ async function calculate() {
     });
     const data = await resp.json();
     const lockData = await lockPromise;
-    if (seq !== calcSeq) return;   // 已有更新的输入，丢弃过期响应
+    if (seq !== calcSeq) return;   // 已有更新的输入：过期响应（成功/无解/失败）一律不回写
     if (resp.ok && data.feasible) {
+      // 只接受与当前地面、净宽逐字一致的结果
+      if (!arrEq(data.ground, ground) || data.width !== widthInfo.value) return;
       lastResult = data;
       lastLockable = (lockData && lockData.feasible) ? lockData : null;
+      resultSeq = seq;
       clearBanner();
       $("resultCard").hidden = false;
       $("earthworkCard").hidden = false;
@@ -527,26 +538,30 @@ async function calculate() {
       renderResult(data, lastLockable);
       renderEarthwork(data.earthwork);
       renderFreezeBar();
-      drawChart(data, frozen ? measured.slice() : null);
+      drawChart(data, frozen && freezeMatchesCurrent() ? measured.slice() : null);
     } else {
       lastResult = null;
       lastLockable = null;
+      resultSeq = seq;
       $("resultCard").hidden = true;
       $("earthworkCard").hidden = true;
       $("acceptCard").hidden = true;
       const reason = (data && data.reason) ? data.reason : "计算失败。";
       showBanner("warn", "<b>无可行方案：</b>" + escapeHtml(reason));
       drawChart(null, null);
+      renderFreezeBar();
     }
   } catch (e) {
     if (seq !== calcSeq) return;
     lastResult = null;
     lastLockable = null;
+    resultSeq = seq;
     $("resultCard").hidden = true;
     $("earthworkCard").hidden = true;
     $("acceptCard").hidden = true;
     showBanner("error", "<b>请求失败：</b>无法连接计算服务（" + escapeHtml(String(e)) + "）");
     drawChart(null, null);
+    renderFreezeBar();
   }
 }
 
@@ -710,8 +725,9 @@ function drawChart(r, measValues) {
 
   const n = ground.length;
   const values = ground.filter(v => Number.isFinite(v));
-  if (r) r.plan.forEach(v => values.push(v));
-  if (measValues && measValues.every(v => Number.isFinite(v)))
+  if (r && Array.isArray(r.plan) && r.plan.length === n) r.plan.forEach(v => values.push(v));
+  if (measValues && measValues.length === n
+      && measValues.every(v => Number.isFinite(v)))
     measValues.forEach(v => values.push(v));
   if (values.length === 0) values.push(0, 200);
   let dMin = Math.min(...values), dMax = Math.max(...values);
@@ -788,7 +804,7 @@ function drawChart(r, measValues) {
   }
 
   // 方案坡线（绿实线）
-  if (r) {
+  if (r && Array.isArray(r.plan) && r.plan.length === n) {
     ctx.strokeStyle = "#2e7d32";
     ctx.lineWidth = 2.6;
     ctx.lineJoin = "round";
@@ -852,7 +868,8 @@ $("btnRemove").addEventListener("click", removePoint);
 $("btnSample").addEventListener("click", loadSample);
 $("btnCalc").addEventListener("click", calculate);
 $("widthInput").addEventListener("input", onWidthEdit);
-window.addEventListener("resize", () => drawChart(lastResult, frozen ? measured.slice() : null));
+window.addEventListener("resize", () =>
+  drawChart(lastResult, frozen && freezeMatchesCurrent() ? measured.slice() : null));
 
 /* ---------- 施工验收 ---------- */
 
@@ -861,19 +878,38 @@ function arrEq(a, b) {
     && a.every((v, i) => v === b[i]);
 }
 
-/* 当前页面状态是否与冻结方案一致：地面、净宽相同，且方案仍是已算完结果 */
-function freezeMatchesCurrent() {
-  if (!frozen || !lastResult || !lastResult.feasible) return false;
+/* 当前结果是否可以冻结：已完成（本次编辑后的新鲜结果）、可行、
+   且逐字对应当前地面与当前净宽。非法输入、无解、计算失败或在途时均不可冻结。
+   按钮启用状态与“冻结”动作共用这一个判定。 */
+function canFreezeCurrent() {
+  if (!lastResult || !lastResult.feasible) return false;
+  if (resultSeq !== calcSeq) return false;
+  if (clientValidate() !== null) return false;
   const w = readWidth();
   return w.ok
     && arrEq(lastResult.ground, ground)
-    && arrEq(lastResult.plan, frozen.plan)
     && lastResult.width === w.value;
 }
 
-/* 地面或净宽变化：废弃冻结方案与实测（在途复核/迟到响应也不能恢复） */
-function invalidateFreeze() {
+/* 冻结快照是否仍对应当前地面、净宽：核对快照自身的 ground/width，
+   并要求该方案仍是当前已算完的新鲜结果——不能只比较方案标高
+   （净宽不影响方案标高，只比标高会让旧净宽的快照误判为有效）。 */
+function freezeMatchesCurrent() {
+  if (!frozen) return false;
+  if (!canFreezeCurrent()) return false;
+  return arrEq(lastResult.ground, frozen.ground)
+    && arrEq(lastResult.plan, frozen.plan)
+    && lastResult.width === frozen.width;
+}
+
+/* 地面或净宽编辑（含增删测点、载入示例、非法值）发生的瞬间即调用：
+   立即废弃冻结、实测、复核报告与确认，禁用冻结动作；
+   同步推进 calcSeq 使在途规划响应（成功/无解/失败）立即作废，
+   不等待防抖计算启动，迟到响应也不能恢复任何状态。 */
+function invalidateInputs() {
+  calcSeq++;
   reviewSeq++;
+  clearTimeout(debounceTimer);
   clearTimeout(reviewTimer);
   frozen = null;
   measured = [];
@@ -882,11 +918,12 @@ function invalidateFreeze() {
   // 立即摘掉实测输入行与复核面板（不重渲地面行，以免打断正在输入的光标）
   document.querySelectorAll(".meas-head, .meas-cell").forEach(el => el.remove());
   $("acceptToolbar").hidden = true;
+  $("confirmState").textContent = "";
   const fb = $("btnFreeze");
   fb.textContent = "冻结当前方案";
-  fb.disabled = !(lastResult && lastResult.feasible);
-  $("freezeNote").textContent = "地面或净宽已修改：冻结方案与实测已废弃，请重新计算后冻结。";
-  $("confirmState").textContent = "";
+  fb.disabled = true;   // 当前结果已过期，新结果到达前禁止冻结旧结果
+  $("freezeNote").textContent =
+    "地面或净宽已修改：冻结方案、实测与验收状态已废弃，新结果到达前不可冻结。";
 }
 
 /* 仅改实测或容差：清空报告、撤销确认，但冻结方案保持不变 */
@@ -898,12 +935,12 @@ function invalidateReviewOnly() {
 }
 
 function onWidthEdit() {
-  invalidateFreeze();
+  invalidateInputs();
   scheduleCalc();
 }
 
 function doFreeze() {
-  if (!lastResult || !lastResult.feasible) return;
+  if (!canFreezeCurrent()) return;   // 与按钮状态同一判定：过期/无解/非法一律不冻结
   // 重新冻结须清除旧实测、报告和确认
   reviewSeq++;
   clearTimeout(reviewTimer);
@@ -1019,7 +1056,7 @@ function renderFreezeBar() {
   const bar = $("acceptToolbar");
   if (frozen && freezeMatchesCurrent()) {
     $("btnFreeze").textContent = "重新冻结当前方案";
-    $("btnFreeze").disabled = !(lastResult && lastResult.feasible);
+    $("btnFreeze").disabled = false;   // freezeMatchesCurrent 已保证可冻结
     $("freezeNote").innerHTML =
       "已冻结方案：<b>" + frozen.plan.join("，") + "</b>"
       + "（净宽 " + fmtNum(frozen.width, 2) + " 米，"
@@ -1030,12 +1067,14 @@ function renderFreezeBar() {
     if (reviewReport) renderReviewReport(reviewReport);
     else clearReviewView();
   } else {
+    // frozen 仍在但已不匹配当前地面/净宽属于防御分支：地面/净宽编辑时
+    // 快照应已在编辑瞬间废弃，迟到响应也无法将其恢复。
     $("btnFreeze").textContent = "冻结当前方案";
-    const can = !!(lastResult && lastResult.feasible);
+    const can = canFreezeCurrent();
     $("btnFreeze").disabled = !can;
     $("freezeNote").textContent = can
       ? "尚未冻结方案。点击“冻结当前方案”锁定当前可行方案后，方可录入实测并复核。"
-      : "当前输入无可行方案，无法冻结。";
+      : "当前结果不可冻结：请等待新计算完成（须为对应当前地面、净宽的可行方案，无可行方案或输入非法时无法冻结）。";
     bar.hidden = true;
   }
   renderConfirmState();

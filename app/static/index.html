@@ -1,0 +1,1181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>步道坡线规划台</title>
+<style>
+  :root {
+    --bg: #f3f5f2;
+    --card: #ffffff;
+    --ink: #1f2a24;
+    --muted: #66736b;
+    --line: #dde3dc;
+    --accent: #2e7d32;
+    --accent-dark: #1b5e20;
+    --ground: #8d6e63;
+    --plan: #2e7d32;
+    --horiz: #1565c0;
+    --danger-bg: #fdecea;
+    --danger-ink: #b3261e;
+    --warn-bg: #fff8e1;
+    --warn-ink: #8d6e00;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC",
+                 system-ui, -apple-system, Segoe UI, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  header {
+    background: linear-gradient(120deg, #2e7d32, #43a047);
+    color: #fff;
+    padding: 18px 24px;
+  }
+  header h1 { margin: 0; font-size: 22px; letter-spacing: 2px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: .9; }
+  main {
+    max-width: 1080px;
+    margin: 20px auto 40px;
+    padding: 0 16px;
+    display: grid;
+    gap: 16px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+    box-shadow: 0 1px 3px rgba(0,0,0,.05);
+  }
+  .card h2 {
+    margin: 0 0 12px;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .card h2 .tag {
+    font-size: 12px;
+    font-weight: normal;
+    color: var(--muted);
+  }
+  .hint { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+
+  /* 编辑器 */
+  .editor-wrap { overflow-x: auto; }
+  table.inputs { border-collapse: collapse; font-size: 13px; }
+  table.inputs th, table.inputs td { padding: 4px 6px; text-align: center; white-space: nowrap; }
+  table.inputs th { color: var(--muted); font-weight: normal; }
+  table.inputs input[type="number"] {
+    width: 74px; padding: 5px 6px;
+    border: 1px solid var(--line); border-radius: 6px;
+    font-size: 14px; text-align: center;
+  }
+  table.inputs input[type="number"]:focus { outline: 2px solid #a5d6a7; border-color: var(--accent); }
+  table.inputs input.locked { background: #f0f4ef; color: var(--muted); }
+  .toolbar { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button {
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 6px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  button.primary:hover { background: var(--accent-dark); color: #fff; }
+  .point-count { font-size: 13px; color: var(--muted); }
+
+  /* 提示条 */
+  .banner {
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 13px;
+    margin: 0 0 12px;
+    border: 1px solid transparent;
+    display: none;
+  }
+  .banner.error { display: block; background: var(--danger-bg); color: var(--danger-ink); border-color: #f3c7c3; }
+  .banner.warn  { display: block; background: var(--warn-bg);  color: var(--warn-ink);  border-color: #ecd98a; }
+  .banner.ok    { display: block; background: #e6f4e7; color: #1b5e20; border-color: #a8d8ab; }
+  .banner b { font-weight: 600; }
+
+  /* 图 */
+  .chart-wrap { width: 100%; }
+  canvas#chart { width: 100%; height: 380px; display: block; }
+  .legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin-top: 6px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .swatch { width: 22px; height: 0; border-top: 3px solid; display: inline-block; }
+  .swatch.dashed { border-top-style: dashed; border-top-color: var(--ground); }
+  .swatch.solid { border-top-color: var(--plan); }
+  .swatch.level { border-top: 3px dotted var(--horiz); }
+
+  /* 结果 */
+  .summary {
+    display: flex; flex-wrap: wrap; gap: 10px 28px;
+    font-size: 14px; margin-bottom: 12px;
+  }
+  .summary .metric { }
+  .summary .metric .num { font-size: 20px; font-weight: 700; color: var(--accent-dark); }
+  .summary .metric .label { color: var(--muted); font-size: 12px; margin-left: 4px; }
+  .tables { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 760px) { .tables { grid-template-columns: 1fr; } }
+  table.data { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.data th, table.data td {
+    border-bottom: 1px solid var(--line);
+    padding: 6px 8px;
+    text-align: center;
+  }
+  table.data th { color: var(--muted); font-weight: normal; font-size: 12px; }
+  table.data td.delta-pos { color: #c62828; }
+  table.data td.delta-neg { color: #1565c0; }
+  .badge {
+    display: inline-block; font-size: 11px; border-radius: 10px;
+    padding: 1px 9px; border: 1px solid var(--line); color: var(--muted);
+  }
+  .badge.yes { background: #e8f2ff; color: #0d47a1; border-color: #b6d4f5; }
+  .sub-title { font-size: 13px; color: var(--muted); margin: 0 0 6px; }
+
+  /* 净宽输入 */
+  .width-box {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--ink);
+  }
+  .width-box input[type="number"] {
+    width: 84px; padding: 5px 6px;
+    border: 1px solid var(--line); border-radius: 6px;
+    font-size: 14px; text-align: center;
+  }
+  .width-box input[type="number"]:focus { outline: 2px solid #a5d6a7; border-color: var(--accent); }
+  .width-box .unit { color: var(--muted); }
+
+  /* 土方调配 */
+  .ew-net-pos { color: #c62828; }
+  .ew-net-neg { color: #1565c0; }
+  /* 施工验收 */
+  .accept-bar {
+    display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+    margin-bottom: 12px;
+  }
+  .frozen-note { font-size: 13px; color: var(--muted); }
+  .frozen-note b { color: var(--ink); font-weight: 600; }
+  table.inputs input.meas { border-color: #f0c98f; }
+  table.inputs input.meas:focus { outline: 2px solid #ffd9a8; border-color: #ef6c00; }
+  table.inputs td.meas-cell { border-top: 2px solid #f0c98f; }
+  table.inputs th.meas-head { border-top: 2px solid #f0c98f; color: #a05a00; }
+  .tol-box {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
+  }
+  .tol-box input[type="number"] {
+    width: 72px; padding: 5px 6px;
+    border: 1px solid var(--line); border-radius: 6px;
+    font-size: 14px; text-align: center;
+  }
+  .tol-box input[type="number"]:focus { outline: 2px solid #ffd9a8; border-color: #ef6c00; }
+  .badge.bad { background: #fdecea; color: #b3261e; border-color: #f3c7c3; }
+  .confirm-state { font-size: 13px; font-weight: 600; }
+  .confirm-state.ok { color: #2e7d32; }
+  .swatch.measured { border-top: 3px solid #ef6c00; }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>步道坡线规划台</h1>
+  <p>测点等间距 1 m · 地面/方案标高 0～200 整数厘米 · 相邻高差 ≤ 8 cm · 任意连续 5 段至少 1 段水平 · 可行方案附土方调配核算</p>
+</header>
+
+<main>
+  <section class="card">
+    <h2>测点编辑 <span class="tag">共 <b id="pointCount">0</b> 个测点（3～16），首尾方案标高与地面标高相同</span></h2>
+    <div class="editor-wrap">
+      <table class="inputs">
+        <thead>
+          <tr id="headRow"></tr>
+        </thead>
+        <tbody>
+          <tr id="inputRow"></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="toolbar">
+      <button id="btnAdd">＋ 添加测点</button>
+      <button id="btnRemove">－ 删除末点</button>
+      <button id="btnSample">载入示例</button>
+      <button id="btnCalc" class="primary">计算方案</button>
+      <span class="point-count">修改标高或净宽后自动重算</span>
+      <label class="width-box">
+        步道净宽
+        <input id="widthInput" type="number" min="0.5" max="10" step="0.01" value="1.50">
+        <span class="unit">米（0.5～10，最多两位小数）</span>
+      </label>
+    </div>
+    <p class="hint">每个地面标高必须是 0～200 的整数厘米；测点间隔固定为 1 m。土方按净宽乘以地面与方案高差的线性积分计，挖正填负。</p>
+  </section>
+
+  <section class="card">
+    <h2>坡线叠画 <span class="tag">棕虚线＝地面标高，绿实线＝冻结方案，橙实线＝实测标高，蓝色点划段＝方案水平段</span></h2>
+    <div id="chartBanner" class="banner"></div>
+    <div class="chart-wrap">
+      <canvas id="chart"></canvas>
+      <div class="legend">
+        <span><i class="swatch dashed"></i>地面坡线</span>
+        <span><i class="swatch solid"></i>冻结方案坡线</span>
+        <span><i class="swatch measured"></i>实测坡线</span>
+        <span><i class="swatch level"></i>水平段（方案高差 0）</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="resultCard" hidden>
+    <h2>计算结果</h2>
+    <div class="summary">
+      <div class="metric"><span class="num" id="sumAdjust">–</span><span class="label">总调整量 Σ|方案−地面|（cm）</span></div>
+      <div class="metric"><span class="num" id="horizCount">–</span><span class="label">水平段数量</span></div>
+      <div class="metric"><span class="num" id="maxDelta">–</span><span class="label">最大相邻高差（cm）</span></div>
+    </div>
+    <div class="tables">
+      <div>
+        <p class="sub-title">各点标高（cm）</p>
+        <table class="data">
+          <thead><tr><th>测点</th><th>地面标高</th><th>方案标高</th><th>|差值|</th><th>可锁定区间</th></tr></thead>
+          <tbody id="pointBody"></tbody>
+        </table>
+      </div>
+      <div>
+        <p class="sub-title">各段高差（cm，Δ＝后点−前点）</p>
+        <table class="data">
+          <thead><tr><th>段号</th><th>起→止</th><th>高差 Δ</th><th>水平段</th></tr></thead>
+          <tbody id="segBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <p class="hint">可锁定区间：单独把该测点方案标高锁定为区间内任意整数厘米时，其余测点仍能补全为满足全部规则的完整坡线（不限总调整量，也不要求与当前最优方案一致）；区间外的值均不可行。首尾测点方案标高固定等于地面标高。</p>
+  </section>
+
+  <section class="card" id="earthworkCard" hidden>
+    <h2>土方调配核算 <span class="tag">净宽 <b id="ewWidth">–</b> 米 · 每段土方集中于该段中点，同段挖填先抵消，余量沿相邻中点调配，全线余量只经起点进出</span></h2>
+    <div class="summary">
+      <div class="metric"><span class="num" id="ewCut">–</span><span class="label">总挖方（m³）</span></div>
+      <div class="metric"><span class="num" id="ewFill">–</span><span class="label">总填方（m³）</span></div>
+      <div class="metric"><span class="num" id="ewNet">–</span><span class="label" id="ewNetLabel">全线净量（m³，挖−填）</span></div>
+      <div class="metric"><span class="num" id="ewWork">–</span><span class="label">运量距离（m³·m）</span></div>
+    </div>
+    <div class="tables">
+      <div>
+        <p class="sub-title">分段挖填（m³，线性积分；交点列为段内挖填变号位置，米）</p>
+        <table class="data">
+          <thead><tr><th>段号</th><th>挖方</th><th>填方</th><th>段净量</th><th>累计净量</th><th>交点</th></tr></thead>
+          <tbody id="ewSegBody"></tbody>
+        </table>
+      </div>
+      <div>
+        <p class="sub-title">调配流量（m³，正值朝终点；起点正＝向线内运入，负＝余量运出）</p>
+        <table class="data">
+          <thead><tr><th>序号</th><th>流向</th><th>距离（m）</th><th>有向净流量</th></tr></thead>
+          <tbody id="ewFlowBody"></tbody>
+        </table>
+      </div>
+    </div>
+    <p class="hint" id="ewNote"></p>
+  </section>
+
+  <section class="card" id="acceptCard" hidden>
+    <h2>施工验收 <span class="tag">仅能冻结与当前地面、净宽一致且已算完的可行方案；复核不对实测重新求优</span></h2>
+    <div class="accept-bar">
+      <button id="btnFreeze" class="primary">冻结当前方案</button>
+      <span class="frozen-note" id="freezeNote">尚未冻结方案。</span>
+    </div>
+
+    <div id="acceptToolbar" hidden>
+      <div class="accept-bar">
+        <label class="tol-box">
+          容差
+          <input id="tolInput" type="number" min="0" max="20" step="1" value="5">
+          <span class="unit">厘米（0～20 整数；|实测−方案| ≤ 容差 为合格）</span>
+        </label>
+        <button id="btnConfirm" disabled>确认验收</button>
+        <span class="confirm-state" id="confirmState"></span>
+      </div>
+      <div id="acceptBanner" class="banner"></div>
+      <p class="hint">在下方橙色行录入与冻结方案等数量的实测标高（0～200 整数厘米）。修改实测或容差会立即清空复核报告并撤销确认；修改地面或净宽会废弃冻结方案与全部实测，需重新冻结。</p>
+
+      <div class="summary" id="reviewSummary" hidden>
+        <div class="metric"><span class="num" id="rvPass">–</span><span class="label">复核结论</span></div>
+        <div class="metric"><span class="num" id="rvTol">–</span><span class="label">超容差点数</span></div>
+        <div class="metric"><span class="num" id="rvGrade">–</span><span class="label">高差超 8 cm 段数</span></div>
+        <div class="metric"><span class="num" id="rvWindow">–</span><span class="label">无水平段 5 段窗口数</span></div>
+        <div class="metric"><span class="num" id="rvEndpoint">–</span><span class="label">首尾不符点数</span></div>
+      </div>
+
+      <div class="tables">
+        <div>
+          <p class="sub-title">逐点偏差（cm，偏差＝实测−方案）</p>
+          <table class="data">
+            <thead><tr><th>测点</th><th>冻结方案</th><th>实测标高</th><th>偏差</th><th>容差</th></tr></thead>
+            <tbody id="rvPointBody"></tbody>
+          </table>
+        </div>
+        <div>
+          <p class="sub-title">复核违规明细</p>
+          <table class="data">
+            <thead><tr><th>类别</th><th>位置</th><th>数值</th></tr></thead>
+            <tbody id="rvIssueBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>目标：总调整量最小；总调整量相同时，取方案标高序列字典序最小者。</footer>
+</main>
+
+<script>
+"use strict";
+
+const N_MIN = 3, N_MAX = 16, H_MIN = 0, H_MAX = 200;
+const W_MIN = 0.5, W_MAX = 10;
+const TOL_MIN = 0, TOL_MAX = 20;
+let ground = [100, 107, 114, 119, 124, 130];
+let lastResult = null;
+let lastLockable = null;
+let debounceTimer = null;
+let calcSeq = 0;
+
+/* 施工验收状态：
+   frozen 仅在“冻结”瞬间由当前已算完、可行且与地面/净宽一致的方案产生；
+   measured 元素数量恒与冻结方案一致（非法编辑记为 NaN）；
+   reviewReport 为最近一次复核报告，accepted 为确认状态；
+   reviewSeq 单调递增，任何编辑都使在途复核响应立刻失效。 */
+let frozen = null;
+let measured = [];
+let reviewReport = null;
+let reviewSeq = 0;
+let reviewTimer = null;
+let accepted = false;
+
+const $ = (id) => document.getElementById(id);
+
+function renderEditor() {
+  const head = $("headRow");
+  const row = $("inputRow");
+  head.innerHTML = "";
+  row.innerHTML = "";
+  ground.forEach((v, i) => {
+    const th = document.createElement("th");
+    th.textContent = "测点" + (i + 1);
+    head.appendChild(th);
+
+    const td = document.createElement("td");
+    const inp = document.createElement("input");
+    inp.type = "number";
+    inp.min = H_MIN; inp.max = H_MAX; inp.step = 1;
+    inp.value = v;
+    inp.dataset.index = i;
+    inp.addEventListener("input", onEdit);
+    td.appendChild(inp);
+    row.appendChild(td);
+  });
+
+  // 已冻结时在表格中追加“实测标高”行（橙框），随冻结方案重建。
+  if (frozen) {
+    ground.forEach((_, i) => {
+      const mth = document.createElement("th");
+      mth.className = "meas-head";
+      mth.textContent = "实测" + (i + 1);
+      head.appendChild(mth);
+
+      const mtd = document.createElement("td");
+      mtd.className = "meas-cell";
+      const m = document.createElement("input");
+      m.className = "meas";
+      m.type = "number";
+      m.min = H_MIN; m.max = H_MAX; m.step = 1;
+      const mv = measured[i];
+      if (Number.isInteger(mv)) m.value = mv;
+      m.placeholder = "实测";
+      m.dataset.index = i;
+      m.addEventListener("input", onMeasuredEdit);
+      mtd.appendChild(m);
+      $("inputRow").appendChild(mtd);
+    });
+  }
+
+  $("pointCount").textContent = ground.length;
+  $("btnAdd").disabled = ground.length >= N_MAX;
+  $("btnRemove").disabled = ground.length <= N_MIN;
+}
+
+function onEdit(e) {
+  const idx = Number(e.target.dataset.index);
+  const raw = e.target.value.trim();
+  if (raw === "") { ground[idx] = NaN; invalidateFreeze(); scheduleCalc(); return; }
+  const v = Number(raw);
+  ground[idx] = Number.isInteger(v) ? v : NaN;
+  invalidateFreeze();
+  scheduleCalc();
+}
+
+function readWidth() {
+  const raw = $("widthInput").value.trim();
+  if (raw === "") return { ok: false, value: NaN, reason: "步道净宽必须填写（0.5～10 米，最多两位小数）。" };
+  if (!/^(?:\d+|\d*\.\d+)$/.test(raw))
+    return { ok: false, value: NaN, reason: "步道净宽必须是数字（0.5～10 米，最多两位小数）。" };
+  const w = Number(raw);
+  if (!Number.isFinite(w) || w < W_MIN || w > W_MAX)
+    return { ok: false, value: NaN, reason: "步道净宽必须在 0.5～10 米之间。" };
+  if (Math.round(w * 100) / 100 !== w)
+    return { ok: false, value: NaN, reason: "步道净宽最多保留两位小数。" };
+  return { ok: true, value: w, reason: null };
+}
+
+function addPoint() {
+  if (ground.length >= N_MAX) return;
+  ground.push(ground[ground.length - 1]);
+  invalidateFreeze();
+  renderEditor();
+  scheduleCalc();
+}
+function removePoint() {
+  if (ground.length <= N_MIN) return;
+  ground.pop();
+  invalidateFreeze();
+  renderEditor();
+  scheduleCalc();
+}
+function loadSample() {
+  ground = [100, 107, 114, 119, 124, 130];
+  invalidateFreeze();
+  renderEditor();
+  scheduleCalc();
+}
+
+function scheduleCalc() {
+  clearTimeout(debounceTimer);
+  debounceTimer = setTimeout(calculate, 250);
+}
+
+function clientValidate() {
+  if (ground.length < N_MIN || ground.length > N_MAX)
+    return "测点数量必须在 3～16 个之间。";
+  for (let i = 0; i < ground.length; i++) {
+    const v = ground[i];
+    if (!Number.isInteger(v))
+      return "第 " + (i + 1) + " 个地面标高必须是 0～200 的整数厘米。";
+    if (v < H_MIN || v > H_MAX)
+      return "第 " + (i + 1) + " 个地面标高 " + v + " 超出范围（0～200 厘米）。";
+  }
+  return null;
+}
+
+function showBanner(kind, html) {
+  const b = $("chartBanner");
+  b.className = "banner " + kind;
+  b.innerHTML = html;
+}
+function clearBanner() {
+  const b = $("chartBanner");
+  b.className = "banner";
+  b.textContent = "";
+}
+
+async function calculate() {
+  const seq = ++calcSeq;
+  const err = clientValidate();
+  const widthInfo = readWidth();
+  if (err || !widthInfo.ok) {
+    lastResult = null;
+    lastLockable = null;
+    $("resultCard").hidden = true;
+    $("earthworkCard").hidden = true;
+    $("acceptCard").hidden = true;
+    showBanner("error", "<b>非法输入：</b>" + escapeHtml(err || widthInfo.reason));
+    drawChart(null, null);
+    return;
+  }
+  try {
+    // 可锁定区间分析与方案计算并发请求；区间请求失败不影响方案展示。
+    const lockPromise = fetch("/api/lockable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ground: ground })
+    }).then(r => r.json()).catch(() => null);
+    const resp = await fetch("/api/plan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ground: ground, width: widthInfo.value })
+    });
+    const data = await resp.json();
+    const lockData = await lockPromise;
+    if (seq !== calcSeq) return;   // 已有更新的输入，丢弃过期响应
+    if (resp.ok && data.feasible) {
+      lastResult = data;
+      lastLockable = (lockData && lockData.feasible) ? lockData : null;
+      clearBanner();
+      $("resultCard").hidden = false;
+      $("earthworkCard").hidden = false;
+      $("acceptCard").hidden = false;
+      renderResult(data, lastLockable);
+      renderEarthwork(data.earthwork);
+      renderFreezeBar();
+      drawChart(data, frozen ? measured.slice() : null);
+    } else {
+      lastResult = null;
+      lastLockable = null;
+      $("resultCard").hidden = true;
+      $("earthworkCard").hidden = true;
+      $("acceptCard").hidden = true;
+      const reason = (data && data.reason) ? data.reason : "计算失败。";
+      showBanner("warn", "<b>无可行方案：</b>" + escapeHtml(reason));
+      drawChart(null, null);
+    }
+  } catch (e) {
+    if (seq !== calcSeq) return;
+    lastResult = null;
+    lastLockable = null;
+    $("resultCard").hidden = true;
+    $("earthworkCard").hidden = true;
+    $("acceptCard").hidden = true;
+    showBanner("error", "<b>请求失败：</b>无法连接计算服务（" + escapeHtml(String(e)) + "）");
+    drawChart(null, null);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+
+function fmtIntervals(intervals) {
+  return intervals.map(function (iv) {
+    return iv[0] === iv[1] ? String(iv[0]) : iv[0] + "～" + iv[1];
+  }).join("、");
+}
+
+function renderResult(r, lockable) {
+  $("sumAdjust").textContent = r.total_adjustment;
+  $("horizCount").textContent = r.horizontal_indices.length;
+  let maxDelta = 0;
+  r.segments.forEach(s => { maxDelta = Math.max(maxDelta, Math.abs(s.delta)); });
+  $("maxDelta").textContent = maxDelta;
+
+  const pb = $("pointBody");
+  pb.innerHTML = "";
+  r.plan.forEach((p, i) => {
+    const tr = document.createElement("tr");
+    const diff = Math.abs(p - r.ground[i]);
+    const pt = lockable && lockable.points ? lockable.points[i] : null;
+    const lockCell = pt && pt.intervals && pt.intervals.length
+      ? fmtIntervals(pt.intervals) : "—";
+    tr.innerHTML =
+      "<td>" + (i + 1) + "</td>" +
+      "<td>" + r.ground[i] + "</td>" +
+      "<td><b>" + p + "</b></td>" +
+      "<td>" + diff + "</td>" +
+      "<td>" + lockCell + "</td>";
+    pb.appendChild(tr);
+  });
+
+  const sb = $("segBody");
+  sb.innerHTML = "";
+  r.segments.forEach(s => {
+    const tr = document.createElement("tr");
+    const sign = s.delta > 0 ? "+" : "";
+    const cls = s.delta > 0 ? "delta-pos" : (s.delta < 0 ? "delta-neg" : "");
+    tr.innerHTML =
+      "<td>" + s.index + "</td>" +
+      "<td>" + s.from + " → " + s.to + "</td>" +
+      '<td class="' + cls + '">' + sign + s.delta + "</td>" +
+      '<td><span class="badge ' + (s.horizontal ? "yes" : "") + '">' +
+        (s.horizontal ? "水平" : "—") + "</span></td>";
+    sb.appendChild(tr);
+  });
+}
+
+/* ---------- 土方调配核算 ---------- */
+
+function fmtNum(v, digits) {
+  digits = digits === undefined ? 3 : digits;
+  if (Math.abs(v) < 0.5 * Math.pow(10, -digits)) v = 0;  // 屏蔽 -0
+  return v.toLocaleString("zh-CN", {
+    minimumFractionDigits: 0, maximumFractionDigits: digits
+  });
+}
+function signedFmt(v, digits) {
+  return (v > 0 ? "+" : "") + fmtNum(v, digits);
+}
+function netClass(v) {
+  return v > 1e-9 ? "ew-net-pos" : (v < -1e-9 ? "ew-net-neg" : "");
+}
+function nodeLabel(name) {
+  if (name === "start") return "起点";
+  if (String(name).indexOf("midpoint:") === 0)
+    return "段" + Number(String(name).slice(9)) + "中点";
+  return String(name);
+}
+
+function renderEarthwork(ew) {
+  $("ewWidth").textContent = fmtNum(ew.width, 2);
+  $("ewCut").textContent = fmtNum(ew.total_cut);
+  $("ewFill").textContent = fmtNum(ew.total_fill);
+
+  const net = ew.total_net;
+  const netEl = $("ewNet");
+  netEl.textContent = signedFmt(net);
+  netEl.className = "num " + netClass(net);
+  $("ewNetLabel").textContent =
+    net > 1e-9 ? "全线净余（m³，需经起点运出）"
+    : net < -1e-9 ? "全线净缺（m³，需经起点运入）"
+    : "全线净量（m³，挖填平衡）";
+  $("ewWork").textContent = fmtNum(ew.transport_work);
+
+  const sb = $("ewSegBody");
+  sb.innerHTML = "";
+  ew.segments.forEach(s => {
+    const tr = document.createElement("tr");
+    const cross = (s.cross_at === null || s.cross_at === undefined)
+      ? "—" : fmtNum(s.cross_at, 2);
+    tr.innerHTML =
+      "<td>" + s.index + "</td>" +
+      "<td>" + fmtNum(s.cut) + "</td>" +
+      "<td>" + fmtNum(s.fill) + "</td>" +
+      '<td class="' + netClass(s.net) + '">' + signedFmt(s.net) + "</td>" +
+      '<td class="' + netClass(s.cumulative_net) + '">' +
+        signedFmt(s.cumulative_net) + "</td>" +
+      "<td>" + cross + "</td>";
+    sb.appendChild(tr);
+  });
+
+  const fb = $("ewFlowBody");
+  fb.innerHTML = "";
+  ew.flows.forEach(f => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      "<td>" + f.index + "</td>" +
+      "<td>" + nodeLabel(f.from) + ' <span class="flow-arrow">→</span> ' +
+        nodeLabel(f.to) + "</td>" +
+      "<td>" + fmtNum(f.distance, 1) + "</td>" +
+      '<td class="' + netClass(f.flow) + '">' + signedFmt(f.flow) + "</td>";
+    fb.appendChild(tr);
+  });
+
+  const q0 = ew.flows.length ? ew.flows[0].flow : 0;
+  let note;
+  if (q0 > 1e-9)
+    note = "全线净缺：需经起点向线内运入 " + fmtNum(q0) + " m³（起点至首段中点流量为正）。";
+  else if (q0 < -1e-9)
+    note = "全线净余：有 " + fmtNum(-q0) + " m³ 余量回流至起点运出（起点至首段中点流量为负）。";
+  else
+    note = "全线挖填平衡，起点处无进出，全部土方在相邻中点间调配完成。";
+  $("ewNote").textContent = note + " 体积与流量计算全程不取整，显示值保留至多 3 位小数。";
+}
+
+/* ---------- Canvas 绘图 ---------- */
+
+function niceStep(range) {
+  const rough = range / 6;
+  const pow = Math.pow(10, Math.floor(Math.log10(rough)));
+  const norm = rough / pow;
+  let step;
+  if (norm <= 1) step = 1;
+  else if (norm <= 2) step = 2;
+  else if (norm <= 5) step = 5;
+  else step = 10;
+  return step * pow;
+}
+
+function drawChart(r, measValues) {
+  const canvas = $("chart");
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 800;
+  const cssH = 380;
+  canvas.width = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const pad = { l: 52, r: 24, t: 20, b: 38 };
+  const w = cssW - pad.l - pad.r;
+  const h = cssH - pad.t - pad.b;
+
+  const n = ground.length;
+  const values = ground.filter(v => Number.isFinite(v));
+  if (r) r.plan.forEach(v => values.push(v));
+  if (measValues && measValues.every(v => Number.isFinite(v)))
+    measValues.forEach(v => values.push(v));
+  if (values.length === 0) values.push(0, 200);
+  let dMin = Math.min(...values), dMax = Math.max(...values);
+  if (dMin === dMax) { dMin -= 10; dMax += 10; }
+  const padY = Math.max(4, (dMax - dMin) * 0.12);
+  dMin = Math.max(H_MIN, Math.floor(dMin - padY));
+  dMax = Math.min(H_MAX, Math.ceil(dMax + padY));
+  if (dMin > dMax) { dMin = H_MIN; dMax = H_MAX; }
+  const span = dMax - dMin || 1;
+
+  const xAt = (i) => pad.l + (n <= 1 ? w / 2 : w * i / (n - 1));
+  const yAt = (v) => pad.t + h * (dMax - v) / span;
+
+  // 网格与纵轴刻度
+  ctx.font = "11px sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  const step = niceStep(span);
+  ctx.strokeStyle = "#eef1ec";
+  ctx.lineWidth = 1;
+  ctx.fillStyle = "#66736b";
+  for (let v = Math.ceil(dMin / step) * step; v <= dMax + 1e-9; v += step) {
+    const y = yAt(v);
+    ctx.beginPath();
+    ctx.moveTo(pad.l, y);
+    ctx.lineTo(pad.l + w, y);
+    ctx.stroke();
+    ctx.fillText(String(Math.round(v)), pad.l - 8, y);
+  }
+
+  // 横轴测点
+  ctx.textAlign = "center";
+  ctx.textBaseline = "top";
+  for (let i = 0; i < n; i++) {
+    const x = xAt(i);
+    ctx.strokeStyle = "#eef1ec";
+    ctx.beginPath();
+    ctx.moveTo(x, pad.t);
+    ctx.lineTo(x, pad.t + h);
+    ctx.stroke();
+    ctx.fillStyle = "#66736b";
+    ctx.fillText(String(i + 1), x, pad.t + h + 8);
+  }
+  ctx.fillText("测点（间距 1 m）", pad.l + w / 2, cssH - 6);
+
+  // 坐标轴
+  ctx.strokeStyle = "#b7c0b4";
+  ctx.beginPath();
+  ctx.moveTo(pad.l, pad.t);
+  ctx.lineTo(pad.l, pad.t + h);
+  ctx.lineTo(pad.l + w, pad.t + h);
+  ctx.stroke();
+
+  // 地面坡线（棕虚线）
+  if (ground.every(v => Number.isFinite(v))) {
+    ctx.save();
+    ctx.setLineDash([7, 5]);
+    ctx.strokeStyle = "#8d6e63";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ground.forEach((v, i) => {
+      const x = xAt(i), y = yAt(v);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    ctx.restore();
+
+    ground.forEach((v, i) => {
+      ctx.fillStyle = "#8d6e63";
+      ctx.beginPath();
+      ctx.arc(xAt(i), yAt(v), 3, 0, Math.PI * 2);
+      ctx.fill();
+    });
+  }
+
+  // 方案坡线（绿实线）
+  if (r) {
+    ctx.strokeStyle = "#2e7d32";
+    ctx.lineWidth = 2.6;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    r.plan.forEach((v, i) => {
+      const x = xAt(i), y = yAt(v);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+
+    // 水平段叠加蓝色点划
+    ctx.save();
+    ctx.setLineDash([5, 4]);
+    ctx.strokeStyle = "#1565c0";
+    ctx.lineWidth = 4;
+    r.segments.forEach(s => {
+      if (!s.horizontal) return;
+      const i = s.index - 1;
+      ctx.beginPath();
+      ctx.moveTo(xAt(i), yAt(r.plan[i]));
+      ctx.lineTo(xAt(i + 1), yAt(r.plan[i + 1]));
+      ctx.stroke();
+    });
+    ctx.restore();
+
+    r.plan.forEach((v, i) => {
+      ctx.fillStyle = "#2e7d32";
+      ctx.beginPath();
+      ctx.arc(xAt(i), yAt(v), 3.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#1b5e20";
+      ctx.font = "11px sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(String(v), xAt(i), yAt(v) - 7);
+    });
+  }
+
+  // 实测坡线（橙实线 + 方块点）：只画全部合法录入的实测
+  if (measValues && measValues.length === n
+      && measValues.every(v => Number.isFinite(v))) {
+    ctx.strokeStyle = "#ef6c00";
+    ctx.lineWidth = 2.2;
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    measValues.forEach((v, i) => {
+      const x = xAt(i), y = yAt(v);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    measValues.forEach((v, i) => {
+      const x = xAt(i), y = yAt(v);
+      ctx.fillStyle = "#ef6c00";
+      ctx.fillRect(x - 3.2, y - 3.2, 6.4, 6.4);
+    });
+  }
+}
+
+$("btnAdd").addEventListener("click", addPoint);
+$("btnRemove").addEventListener("click", removePoint);
+$("btnSample").addEventListener("click", loadSample);
+$("btnCalc").addEventListener("click", calculate);
+$("widthInput").addEventListener("input", onWidthEdit);
+window.addEventListener("resize", () => drawChart(lastResult, frozen ? measured.slice() : null));
+
+/* ---------- 施工验收 ---------- */
+
+function arrEq(a, b) {
+  return Array.isArray(a) && Array.isArray(b) && a.length === b.length
+    && a.every((v, i) => v === b[i]);
+}
+
+/* 当前页面状态是否与冻结方案一致：地面、净宽相同，且方案仍是已算完结果 */
+function freezeMatchesCurrent() {
+  if (!frozen || !lastResult || !lastResult.feasible) return false;
+  const w = readWidth();
+  return w.ok
+    && arrEq(lastResult.ground, ground)
+    && arrEq(lastResult.plan, frozen.plan)
+    && lastResult.width === w.value;
+}
+
+/* 地面或净宽变化：废弃冻结方案与实测（在途复核/迟到响应也不能恢复） */
+function invalidateFreeze() {
+  reviewSeq++;
+  clearTimeout(reviewTimer);
+  frozen = null;
+  measured = [];
+  reviewReport = null;
+  accepted = false;
+  // 立即摘掉实测输入行与复核面板（不重渲地面行，以免打断正在输入的光标）
+  document.querySelectorAll(".meas-head, .meas-cell").forEach(el => el.remove());
+  $("acceptToolbar").hidden = true;
+  const fb = $("btnFreeze");
+  fb.textContent = "冻结当前方案";
+  fb.disabled = !(lastResult && lastResult.feasible);
+  $("freezeNote").textContent = "地面或净宽已修改：冻结方案与实测已废弃，请重新计算后冻结。";
+  $("confirmState").textContent = "";
+}
+
+/* 仅改实测或容差：清空报告、撤销确认，但冻结方案保持不变 */
+function invalidateReviewOnly() {
+  reviewSeq++;
+  clearTimeout(reviewTimer);
+  reviewReport = null;
+  accepted = false;
+}
+
+function onWidthEdit() {
+  invalidateFreeze();
+  scheduleCalc();
+}
+
+function doFreeze() {
+  if (!lastResult || !lastResult.feasible) return;
+  // 重新冻结须清除旧实测、报告和确认
+  reviewSeq++;
+  clearTimeout(reviewTimer);
+  frozen = {
+    ground: lastResult.ground.slice(),
+    plan: lastResult.plan.slice(),
+    width: lastResult.width,
+  };
+  measured = new Array(frozen.plan.length).fill(NaN);
+  reviewReport = null;
+  accepted = false;
+  $("tolInput").value = "5";
+  renderEditor();
+  renderFreezeBar();
+  clearReviewView();
+  drawChart(lastResult, null);
+}
+
+function onMeasuredEdit(e) {
+  if (!frozen) return;
+  const idx = Number(e.target.dataset.index);
+  const raw = e.target.value.trim();
+  if (raw === "") { measured[idx] = NaN; }
+  else {
+    const v = Number(raw);
+    measured[idx] = Number.isInteger(v) ? v : NaN;
+  }
+  invalidateReviewOnly();
+  clearReviewView();
+  scheduleReview();
+  drawChart(lastResult, measured.slice());
+}
+
+function onToleranceEdit() {
+  invalidateReviewOnly();
+  clearReviewView();
+  scheduleReview();
+}
+
+function readTolerance() {
+  const raw = $("tolInput").value.trim();
+  if (raw === "" || !/^-?\d+$/.test(raw))
+    return { ok: false, value: null, reason: "容差必须是 0～20 的整数厘米。" };
+  const t = Number(raw);
+  if (t < TOL_MIN || t > TOL_MAX)
+    return { ok: false, value: null, reason: "容差必须在 0～20 厘米之间。" };
+  return { ok: true, value: t, reason: null };
+}
+
+function clientValidateMeasured() {
+  for (let i = 0; i < measured.length; i++) {
+    const v = measured[i];
+    if (!Number.isInteger(v))
+      return "第 " + (i + 1) + " 个实测标高必须录入 0～200 的整数厘米。";
+    if (v < H_MIN || v > H_MAX)
+      return "第 " + (i + 1) + " 个实测标高 " + v + " 超出范围（0～200 厘米）。";
+  }
+  return null;
+}
+
+function scheduleReview() {
+  clearTimeout(reviewTimer);
+  reviewTimer = setTimeout(runReview, 250);
+}
+
+async function runReview() {
+  if (!frozen) return;
+  const seq = reviewSeq;
+  const mErr = clientValidateMeasured();
+  const tolInfo = readTolerance();
+  if (mErr || !tolInfo.ok) {
+    reviewReport = null;
+    renderReviewInvalid(mErr || tolInfo.reason);
+    return;
+  }
+  let data;
+  try {
+    const resp = await fetch("/api/acceptance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ground: frozen.ground,
+        plan: frozen.plan,
+        measured: measured.slice(),
+        tolerance: tolInfo.value,
+      }),
+    });
+    data = await resp.json();
+    if (seq !== reviewSeq) return;   // 迟到响应：输入已变，不能恢复任何数据
+    if (!resp.ok || typeof data.passed !== "boolean") {
+      reviewReport = null;
+      renderReviewInvalid((data && data.reason) ? data.reason
+        : "复核请求失败（HTTP " + resp.status + "）。");
+      return;
+    }
+  } catch (e) {
+    if (seq !== reviewSeq) return;
+    reviewReport = null;
+    renderReviewInvalid("复核请求失败：" + String(e) + "（冻结方案保留不变）。");
+    return;
+  }
+  reviewReport = data;
+  renderReviewReport(data);
+}
+
+function onConfirm() {
+  if (!reviewReport || !reviewReport.passed) return;
+  accepted = true;
+  renderReviewReport(reviewReport);
+}
+
+function renderFreezeBar() {
+  const bar = $("acceptToolbar");
+  if (frozen && freezeMatchesCurrent()) {
+    $("btnFreeze").textContent = "重新冻结当前方案";
+    $("btnFreeze").disabled = !(lastResult && lastResult.feasible);
+    $("freezeNote").innerHTML =
+      "已冻结方案：<b>" + frozen.plan.join("，") + "</b>"
+      + "（净宽 " + fmtNum(frozen.width, 2) + " 米，"
+      + frozen.plan.length + " 个测点）。请在下方录入实测标高。";
+    bar.hidden = false;
+    // 实测行由冻结/重冻结时的 renderEditor 建立；此处不重渲，
+    // 避免迟到的规划响应重建输入行、打断正在录入实测的光标。
+    if (reviewReport) renderReviewReport(reviewReport);
+    else clearReviewView();
+  } else {
+    $("btnFreeze").textContent = "冻结当前方案";
+    const can = !!(lastResult && lastResult.feasible);
+    $("btnFreeze").disabled = !can;
+    $("freezeNote").textContent = can
+      ? "尚未冻结方案。点击“冻结当前方案”锁定当前可行方案后，方可录入实测并复核。"
+      : "当前输入无可行方案，无法冻结。";
+    bar.hidden = true;
+  }
+  renderConfirmState();
+}
+
+function renderConfirmState() {
+  const btn = $("btnConfirm");
+  const st = $("confirmState");
+  if (accepted && reviewReport && reviewReport.passed) {
+    btn.disabled = true;
+    st.textContent = "✓ 已确认验收";
+    st.className = "confirm-state ok";
+  } else if (reviewReport && reviewReport.passed) {
+    btn.disabled = false;
+    st.textContent = "复核通过，可以确认验收。";
+    st.className = "confirm-state";
+  } else {
+    btn.disabled = true;
+    st.textContent = "";
+    st.className = "confirm-state";
+  }
+}
+
+function showAcceptBanner(kind, html) {
+  const b = $("acceptBanner");
+  b.className = "banner " + kind;
+  b.innerHTML = html;
+}
+function clearAcceptBanner() {
+  const b = $("acceptBanner");
+  b.className = "banner";
+  b.textContent = "";
+}
+
+/* 清空报告视图（实测/容差一改即调用；撤销确认在 renderConfirmState 体现） */
+function clearReviewView() {
+  clearAcceptBanner();
+  $("reviewSummary").hidden = true;
+  $("rvPointBody").innerHTML = "";
+  $("rvIssueBody").innerHTML = "";
+  renderConfirmState();
+}
+
+/* 复核输入非法或请求失败：清空报告、撤销并禁用确认；冻结方案不动 */
+function renderReviewInvalid(reason) {
+  clearAcceptBanner();
+  $("reviewSummary").hidden = true;
+  $("rvPointBody").innerHTML = "";
+  $("rvIssueBody").innerHTML = "";
+  showAcceptBanner("error", "<b>无法复核：</b>" + escapeHtml(reason));
+  renderConfirmState();
+}
+
+function devClass(d) {
+  return d > 0 ? "delta-pos" : (d < 0 ? "delta-neg" : "");
+}
+function signed(v) { return (v > 0 ? "+" : "") + v; }
+
+function renderReviewReport(r) {
+  const tol = r.tolerance;
+  $("reviewSummary").hidden = false;
+
+  const passEl = $("rvPass");
+  passEl.textContent = r.passed ? "通过" : "不通过";
+  passEl.style.color = r.passed ? "#1b5e20" : "#b3261e";
+  $("rvTol").textContent = r.over_tolerance_points.length;
+  $("rvGrade").textContent = r.over_grade_segments.length;
+  $("rvWindow").textContent = r.no_horizontal_windows.length;
+  $("rvEndpoint").textContent = r.endpoint_mismatches.length;
+
+  const badTol = {};
+  r.over_tolerance_points.forEach(p => { badTol[p.index] = true; });
+  const pb = $("rvPointBody");
+  pb.innerHTML = "";
+  r.plan.forEach((p, i) => {
+    const d = r.deviations[i];
+    const tr = document.createElement("tr");
+    const over = badTol[i + 1];
+    tr.innerHTML =
+      "<td>" + (i + 1) + "</td>" +
+      "<td>" + p + "</td>" +
+      "<td>" + r.measured[i] + "</td>" +
+      '<td class="' + devClass(d) + '"><b>' + signed(d) + "</b></td>" +
+      '<td><span class="badge ' + (over ? "bad" : "ok") + '">' +
+        (over ? "超" + signed(d) : "±" + tol) + "</span></td>";
+    pb.appendChild(tr);
+  });
+
+  const ib = $("rvIssueBody");
+  ib.innerHTML = "";
+  const rows = [];
+  r.over_tolerance_points.forEach(p => rows.push([
+    "超容差点", "测点 " + p.index,
+    "实测 " + p.measured + " / 方案 " + p.plan + "，偏差 " + signed(p.deviation)
+      + "（容差 ±" + tol + "）"]));
+  r.over_grade_segments.forEach(s => rows.push([
+    "高差超 8 cm", "第 " + s.index + " 段（" + s.from + "→" + s.to + "）",
+    "实测高差 " + signed(s.delta) + " cm"]));
+  r.no_horizontal_windows.forEach(win => rows.push([
+    "连续 5 段无水平",
+    "第 " + win.from_segment + "～" + win.to_segment + " 段",
+    "实测段 " + win.segments.join("、") + " 均非水平"]));
+  r.endpoint_mismatches.forEach(p => rows.push([
+    "首尾不等于方案", "测点 " + p.index,
+    "实测 " + p.measured + " ≠ 方案 " + p.plan]));
+  if (rows.length === 0) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = '<td colspan="3">无违规：逐点偏差均在容差内，实测无超 8 cm '
+      + '高差段，所有连续 5 段窗口均含水平段，首尾与方案一致。</td>';
+    ib.appendChild(tr);
+  } else {
+    rows.forEach(row => {
+      const tr = document.createElement("tr");
+      tr.innerHTML =
+        '<td><span class="badge bad">' + row[0] + "</span></td>"
+        + "<td>" + row[1] + "</td><td>" + escapeHtml(row[2]) + "</td>";
+      ib.appendChild(tr);
+    });
+  }
+
+  if (r.passed) {
+    showAcceptBanner("ok",
+      "<b>复核通过：</b>全部检查项无违规，可点击“确认验收”完成验收。"
+      + "（验收仅核对冻结方案与实测，不对实测重新求优。）");
+  } else {
+    showAcceptBanner("error",
+      "<b>复核不通过：</b>存在 "
+      + (r.over_tolerance_points.length + r.over_grade_segments.length
+         + r.no_horizontal_windows.length + r.endpoint_mismatches.length)
+      + " 处违规（见下表），确认验收已禁用。");
+  }
+  renderConfirmState();
+}
+
+$("btnFreeze").addEventListener("click", doFreeze);
+$("btnConfirm").addEventListener("click", onConfirm);
+$("tolInput").addEventListener("input", onToleranceEdit);
+
+renderEditor();
+calculate();
+</script>
+</body>
+</html>
